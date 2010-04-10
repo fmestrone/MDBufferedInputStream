@@ -1,13 +1,13 @@
 //
 //  MDBufferedInputStream.m
-//  iDEX
+//  A NSInputStream decorator that adds buffering and text parsing functionality
+//  Text is returned line by line through the readLine method
 //
 //  Created by Federico Mestrone on 07/04/2010.
 //  Copyright 2010 Moodsdesign Ltd. All rights reserved.
 //
 
 /*
- 
  TODO
  read the first kilobyte or so of a file, and scan for \r.  If you find
  one, look at the next character and see if it's a \n.  If so, it's a
@@ -39,31 +39,52 @@
 #pragma mark MDBufferedInputStream methods
 
 - (NSString *) readLine {
+	// emptying out the line buffer - this method will keep on reading
+	// from the byte buffer and the stream until it can return a string,
+	// either because it found a new line, or because it reached EOF
 	[lineBuffer setLength:0];
+	// make sure you start from where we left off with the previous call
 	NSUInteger offset = pos;
+	// this specifies where in the byte buffer the new line element was
+	// found, but also serves as flag (if -1, no new line was found)
 	NSInteger found = -1;
 	do {
 		if ( pos >= read ) {
+			// we have reached the end of the byte buffer, read another chunk
 			read = [stream read:dataBuffer maxLength:bufSize];
+			// reset position in buffer and offset
 			pos = offset = 0;
 			if ( !read ) {
+				// nothing was read, we have reached EOF
 				if ( [lineBuffer length] ) {
+					// if there are bytes in the line buffer, make sure whatever is there
+					// is returned as the last line of the file
 					break;
 				} else {
+					// no byte in the byte buffer, so signal that we have finished parsing
 					return nil;
 				}
 			}
 		}
+		// this loop looks for line termination markers
 		for ( ; pos < read; ++pos ) {
 			if ( dataBuffer[pos] == 0x0A || dataBuffer[pos] == 0x0D ) {
+				// found one, save its position
 				found = pos;
+				// move the pointer forward to the character at the beginning of the new line
 				++pos;
 				break;
 			}
 		}
+		// add the processed bytes to the line buffer
 		[lineBuffer appendBytes:&dataBuffer[offset] length:(found < 0 ? read : found) - offset];
-	} while ( (found < 0) && read );
+	// if a new line was not found, read more from the stream and continue
+	} while ( (found < 0) /* && read */ );
+	// TODO not very good multithread support - if bytesProcessed is read by another thread in the middle
+	// of the execution of this method it will return inconsistent values - but it's ok for now
 	bytesProcessed += [lineBuffer length];
+	// create a new string with the line buffer
+	// TODO check for leak issues with this code
 	return [[[NSString alloc] initWithData:lineBuffer encoding:encoding] autorelease];
 }
 
@@ -72,6 +93,8 @@
 
 - (void) open {
 	if ( shouldCloseStream = ([stream streamStatus] == kCFStreamStatusNotOpen) ) {
+		// If the underlying stream is not already open, we open it ourselves
+		// and we will close it when the decorator is closed
 		[stream open];
 	}
 	lineBuffer = [[NSMutableData alloc] init];
@@ -85,6 +108,7 @@
 	return [stream hasBytesAvailable];
 }
 
+// TODO define the semantics of this method within the decorator
 - (NSInteger) read:(uint8_t *)buffer maxLength:(NSUInteger)len {
 	return (bytesProcessed += [stream read:buffer maxLength:len]);
 }
@@ -99,6 +123,7 @@
 	lineBuffer = nil;
 	dataBuffer = nil;
 	if ( shouldCloseStream ) {
+		// Close the underlying stream if is was opened by this decorator
 		[stream close];
 	}
 }

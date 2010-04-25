@@ -18,7 +18,6 @@
 
 #import "MDBufferedInputStream.h"
 
-
 @implementation MDBufferedInputStream
 
 @synthesize bytesProcessed;
@@ -28,7 +27,7 @@
 
 - (id) initWithInputStream:(NSInputStream *)_stream bufferSize:(NSUInteger)_bufSize encoding:(NSStringEncoding)_encoding {
 	if ( self = [super init] ) {
-		stream = _stream;
+		stream = [_stream retain];
 		bufSize = _bufSize;
 		encoding = _encoding;
 	}
@@ -82,6 +81,9 @@
 	} while ( (found < 0) /* && read */ );
 	// TODO not very good multithread support - if bytesProcessed is read by another thread in the middle
 	// of the execution of this method it will return inconsistent values - but it's ok for now
+	// Also note we increase bytesProcessed in readLine as it doesn't invoke [self read:maxLength:],
+	// but rather [stream read:maxLength:] directly, otherwise increasing in [MDBufferedInputStream read:maxLength:]
+	// would be enough
 	bytesProcessed += [lineBuffer length];
 	// create a new string with the line buffer
 	// TODO check for leak issues with this code
@@ -133,6 +135,7 @@
 
 - (void) dealloc {
 	[self close];
+    [stream release];
 	[super dealloc];
 }
 

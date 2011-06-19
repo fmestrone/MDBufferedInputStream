@@ -37,6 +37,10 @@
 #pragma mark -
 #pragma mark MDBufferedInputStream methods
 
+/*
+ Breaks on \r\n and \n. Does not support \r-only (old Mac) line breaks.
+ This method is not re-entrant.
+ */
 - (NSString *) readLine {
 	// emptying out the line buffer - this method will keep on reading
 	// from the byte buffer and the stream until it can return a string,
@@ -67,7 +71,8 @@
 		}
 		// this loop looks for line termination markers
 		for ( ; pos < read; ++pos ) {
-			if ( dataBuffer[pos] == 0x0A || dataBuffer[pos] == 0x0D ) {
+            // don't break on \r, it will be removed later
+			if ( dataBuffer[pos] == '\n' ) {
 				// found one, save its position
 				found = pos;
 				// move the pointer forward to the character at the beginning of the new line
@@ -84,10 +89,17 @@
 	// Also note we increase bytesProcessed in readLine as it doesn't invoke [self read:maxLength:],
 	// but rather [stream read:maxLength:] directly, otherwise increasing in [MDBufferedInputStream read:maxLength:]
 	// would be enough
-	bytesProcessed += [lineBuffer length];
+    NSUInteger length = [lineBuffer length];
+	bytesProcessed += length;
 	// create a new string with the line buffer
 	// TODO check for leak issues with this code
-	return [[[NSString alloc] initWithData:lineBuffer encoding:encoding] autorelease];
+
+    const uint8_t *bytes = [lineBuffer bytes];
+    if (length > 0 && bytes[length-1] == '\r') {
+        length -= 1; // remove last \r to interpret \r\n as line break
+    }
+
+	return [[[NSString alloc] initWithBytes:bytes length:length encoding:encoding] autorelease];
 }
 
 #pragma mark -

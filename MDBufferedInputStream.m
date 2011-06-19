@@ -26,7 +26,7 @@
 #pragma mark Initialisation
 
 - (id) initWithInputStream:(NSInputStream *)_stream bufferSize:(NSUInteger)_bufSize encoding:(NSStringEncoding)_encoding {
-	if ( self = [super init] ) {
+	if ( (self = [super init]) ) {
 		stream = [_stream retain];
 		bufSize = _bufSize;
 		encoding = _encoding;
@@ -94,7 +94,7 @@
 #pragma mark NSInputStream methods
 
 - (void) open {
-	if ( shouldCloseStream = ([stream streamStatus] == kCFStreamStatusNotOpen) ) {
+	if ( (shouldCloseStream = ([stream streamStatus] == kCFStreamStatusNotOpen)) ) {
 		// If the underlying stream is not already open, we open it ourselves
 		// and we will close it when the decorator is closed
 		[stream open];

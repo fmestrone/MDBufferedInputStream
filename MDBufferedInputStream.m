@@ -53,7 +53,7 @@
 			read = [stream read:dataBuffer maxLength:bufSize];
 			// reset position in buffer and offset
 			pos = offset = 0;
-			if ( !read ) {
+			if ( read <= 0 ) {
 				// nothing was read, we have reached EOF
 				if ( [lineBuffer length] ) {
 					// if there are bytes in the line buffer, make sure whatever is there

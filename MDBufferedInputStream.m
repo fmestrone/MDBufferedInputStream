@@ -26,7 +26,7 @@
 #pragma mark Initialisation
 
 - (id) initWithInputStream:(NSInputStream *)_stream bufferSize:(NSUInteger)_bufSize encoding:(NSStringEncoding)_encoding {
-	if ( self = [super init] ) {
+	if ( (self = [super init]) ) {
 		stream = [_stream retain];
 		bufSize = _bufSize;
 		encoding = _encoding;
@@ -37,6 +37,10 @@
 #pragma mark -
 #pragma mark MDBufferedInputStream methods
 
+/*
+ Breaks on \r\n and \n. Does not support \r-only (old Mac) line breaks.
+ This method is not re-entrant.
+ */
 - (NSString *) readLine {
 	// emptying out the line buffer - this method will keep on reading
 	// from the byte buffer and the stream until it can return a string,
@@ -53,7 +57,7 @@
 			read = [stream read:dataBuffer maxLength:bufSize];
 			// reset position in buffer and offset
 			pos = offset = 0;
-			if ( !read ) {
+			if ( read <= 0 ) {
 				// nothing was read, we have reached EOF
 				if ( [lineBuffer length] ) {
 					// if there are bytes in the line buffer, make sure whatever is there
@@ -67,7 +71,8 @@
 		}
 		// this loop looks for line termination markers
 		for ( ; pos < read; ++pos ) {
-			if ( dataBuffer[pos] == 0x0A || dataBuffer[pos] == 0x0D ) {
+            // don't break on \r, it will be removed later
+			if ( dataBuffer[pos] == '\n' ) {
 				// found one, save its position
 				found = pos;
 				// move the pointer forward to the character at the beginning of the new line
@@ -84,17 +89,24 @@
 	// Also note we increase bytesProcessed in readLine as it doesn't invoke [self read:maxLength:],
 	// but rather [stream read:maxLength:] directly, otherwise increasing in [MDBufferedInputStream read:maxLength:]
 	// would be enough
-	bytesProcessed += [lineBuffer length];
+    NSUInteger length = [lineBuffer length];
+	bytesProcessed += length;
 	// create a new string with the line buffer
 	// TODO check for leak issues with this code
-	return [[[NSString alloc] initWithData:lineBuffer encoding:encoding] autorelease];
+
+    const uint8_t *bytes = [lineBuffer bytes];
+    if (length > 0 && bytes[length-1] == '\r') {
+        length -= 1; // remove last \r to interpret \r\n as line break
+    }
+
+	return [[[NSString alloc] initWithBytes:bytes length:length encoding:encoding] autorelease];
 }
 
 #pragma mark -
 #pragma mark NSInputStream methods
 
 - (void) open {
-	if ( shouldCloseStream = ([stream streamStatus] == kCFStreamStatusNotOpen) ) {
+	if ( (shouldCloseStream = ([stream streamStatus] == kCFStreamStatusNotOpen)) ) {
 		// If the underlying stream is not already open, we open it ourselves
 		// and we will close it when the decorator is closed
 		[stream open];

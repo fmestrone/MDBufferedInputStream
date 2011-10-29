@@ -32,14 +32,39 @@
 	NSUInteger bytesProcessed;
 	// Whether the stream was opened by this decorator and should therefore be closed with it	
 	BOOL shouldCloseStream;
+	// Whether the object should return empty lines or not
+	BOOL wantsEmptyLines;
+
+    /**********************************
+     CSV Files
+     **********************************/
+    NSArray *csvTitles;
+    unichar quote;
+    unichar separator;
 }
 
 // Returns the number of bytes that have currently been processed by the decorator
 @property (readonly) NSUInteger bytesProcessed;
+// Returns or sets whether the object returns empty lines or not
+@property BOOL wantsEmptyLines;
 
 // Creates a new decorator with the given stream, chunk size, and encoding
-- (id)initWithInputStream:(NSInputStream *)stream bufferSize:(NSUInteger)bufSize encoding:(NSStringEncoding)encoding;
+- (id) initWithInputStream:(NSInputStream *)stream bufferSize:(NSUInteger)bufSize encoding:(NSStringEncoding)encoding;
+
 // Read a new line of text from the underlying stream
-- (NSString *)readLine;
+- (NSString *) readLine;
+
+/**********************************
+ CSV Files
+ **********************************/
+
+// Returns or sets the titles for each field of a CSV file
+@property (retain) NSArray *csvTitles;
+
+// Read the line of CSV header titles from the underlying stream
+- (NSArray *) csvReadHeader;
+// Read a new line of CSV text data from the underlying stream
+- (NSDictionary *) csvReadData;
+
 
 @end

@@ -18,9 +18,17 @@
 
 #import "MDBufferedInputStream.h"
 
+@interface MDBufferedInputStream (PrivateMethods)
+
+- (NSString *) csvReadToken:(NSString *)line fromIndex:(int *)pos;
+
+@end
+
 @implementation MDBufferedInputStream
 
 @synthesize bytesProcessed;
+@synthesize wantsEmptyLines;
+@synthesize csvTitles;
 
 #pragma mark -
 #pragma mark Initialisation
@@ -30,6 +38,9 @@
 		stream = [_stream retain];
 		bufSize = _bufSize;
 		encoding = _encoding;
+        wantsEmptyLines = NO;
+        quote = '"';
+        separator = ',';
 	}
 	return self;
 }
@@ -47,13 +58,18 @@
 	// this specifies where in the byte buffer the new line element was
 	// found, but also serves as flag (if -1, no new line was found)
 	NSInteger found = -1;
+    // this remembers that the previous character was 0x0D so that we can then
+    // check for a following 0x0A as one new line (CR+LF)
+    BOOL foundCR = NO;
 	do {
 		if ( pos >= read ) {
 			// we have reached the end of the byte buffer, read another chunk
 			read = [stream read:dataBuffer maxLength:bufSize];
 			// reset position in buffer and offset
 			pos = offset = 0;
-			if ( !read ) {
+            if ( read < 0 ) {
+                @throw [NSException exceptionWithName:@"StreamReadError" reason:nil userInfo:[NSDictionary dictionaryWithObject:[stream streamError] forKey:@"error"]];
+            } else if ( !read ) {
 				// nothing was read, we have reached EOF
 				if ( [lineBuffer length] ) {
 					// if there are bytes in the line buffer, make sure whatever is there
@@ -67,18 +83,46 @@
 		}
 		// this loop looks for line termination markers
 		for ( ; pos < read; ++pos ) {
-			if ( dataBuffer[pos] == 0x0A || dataBuffer[pos] == 0x0D ) {
-				// found one, save its position
-				found = pos;
-				// move the pointer forward to the character at the beginning of the new line
-				++pos;
-				break;
-			}
+            if ( foundCR ) {
+                foundCR = NO;
+				found = offset;
+                if ( dataBuffer[pos] == 0x0A ) {
+                    // found a CR + LF, save its position (we are already one char ahead)
+                    ++pos;
+                    break;
+                } else {
+                    // found a lone CR, save its position (we are already one char ahead)
+                    break;
+                }
+            }
+            // is it a line terminator?
+            if ( dataBuffer[pos] == 0x0D || dataBuffer[pos] == 0x0A || dataBuffer[pos] == 0x0C || dataBuffer[pos] == 0x85 ) {
+                // could be part of a CR+LF combination...
+                foundCR = dataBuffer[pos] == 0x0D;
+                // move the pointer forward to the character at the beginning of the new line
+                ++pos;
+                // definitely found one new line, save its position
+                found = pos;
+                break;
+            }
 		}
 		// add the processed bytes to the line buffer
 		[lineBuffer appendBytes:&dataBuffer[offset] length:(found < 0 ? read : found) - offset];
+		// need to check for a CR+LF combination?
+        if ( foundCR ) {
+            // if so, cannot exit now
+            found = -1;
+        // should not return empty lines?
+        } else if ( found >= 0 && !wantsEmptyLines && ![lineBuffer length] ) {
+            // if so, cannot exit now
+            found = -1;
+            // move to next character of new line (???)
+            ++pos;
+            // make sure you start from the new line
+            offset = pos;
+        }
 	// if a new line was not found, read more from the stream and continue
-	} while ( (found < 0) /* && read */ );
+	} while ( found < 0 /* && read */ );
 	// TODO not very good multithread support - if bytesProcessed is read by another thread in the middle
 	// of the execution of this method it will return inconsistent values - but it's ok for now
 	// Also note we increase bytesProcessed in readLine as it doesn't invoke [self read:maxLength:],
@@ -89,6 +133,85 @@
 	// TODO check for leak issues with this code
 	return [[[NSString alloc] initWithData:lineBuffer encoding:encoding] autorelease];
 }
+
+#pragma mark -
+#pragma mark Reading CSV Files
+
+- (NSString *) csvReadToken:(NSString *)line fromIndex:(int *)p {
+    if ( *p >= [line length] ) {
+        return nil;
+    }
+    NSMutableString *buffer = [[NSMutableString alloc] init];
+    BOOL atStart = YES;
+    BOOL inQuote = NO;
+    BOOL afterQuote = NO;
+
+    for ( ; *p < [line length]; ++*p ) {
+        unichar c = [line characterAtIndex:*p];
+        if ( inQuote ) {
+            if ( c == quote ) {
+                inQuote = NO;
+                afterQuote = YES;
+            } else {
+                [buffer appendString:[NSString stringWithFormat:@"%C", c]];
+            }
+            continue;
+        } else if ( atStart && c == quote ) {
+            inQuote = YES;
+            atStart = NO;
+            continue;
+        }
+        if ( c == separator ) {
+            ++*p;
+            break;
+        }
+        if ( (atStart || afterQuote) && [[NSCharacterSet whitespaceCharacterSet] characterIsMember:c] ) {
+            continue;
+        }
+        atStart = NO;
+        [buffer appendString:[NSString stringWithFormat:@"%C", c]];
+    }
+
+    return buffer;
+}
+
+// Read the line of CSV header titles from the underlying stream
+- (NSArray *) csvReadHeader {
+    NSString *headline = [self readLine];
+    if ( !headline ) return nil;
+    NSMutableArray *titles = [[NSMutableArray alloc] init];
+    int p = 0;
+    NSString *token;
+    while ( token = [self csvReadToken:headline fromIndex:&p] ) {
+        [titles addObject:token];
+    }
+    csvTitles = [titles retain];
+    return titles;
+}
+
+// Read a new line of CSV text data from the underlying stream
+- (NSDictionary *) csvReadData {
+    NSString *dataline = [self readLine];
+    if ( !dataline ) return nil;
+    NSMutableDictionary *dict = [[NSMutableDictionary alloc] init];
+    int p = 0, f = 0;
+    NSString *token;
+    while ( token = [self csvReadToken:dataline fromIndex:&p] ) {
+        NSString *fieldName;
+        if ( csvTitles && f < [csvTitles count] ) {
+            fieldName = [csvTitles objectAtIndex:f];
+        } else {
+            fieldName = [NSString stringWithFormat:@"field%d", f];
+            if ( csvTitles ) {
+                NSLog(@"Warning: possible error in following line\n%@\n", dataline);
+            }
+        }
+        [dict setObject:token forKey:fieldName];
+        ++f;
+    }
+    return dict;
+}
+
 
 #pragma mark -
 #pragma mark NSInputStream methods
@@ -120,8 +243,10 @@
 }
 
 - (void) close {
+    [csvTitles release];
 	[lineBuffer release];
 	free(dataBuffer);
+    csvTitles = nil;
 	lineBuffer = nil;
 	dataBuffer = nil;
 	if ( shouldCloseStream ) {

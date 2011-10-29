@@ -34,7 +34,7 @@
 #pragma mark Initialisation
 
 - (id) initWithInputStream:(NSInputStream *)_stream bufferSize:(NSUInteger)_bufSize encoding:(NSStringEncoding)_encoding {
-	if ( self = [super init] ) {
+	if ( (self = [super init]) ) {
 		stream = [_stream retain];
 		bufSize = _bufSize;
 		encoding = _encoding;
@@ -48,6 +48,10 @@
 #pragma mark -
 #pragma mark MDBufferedInputStream methods
 
+/*
+ Breaks on \r\n and \n. Does not support \r-only (old Mac) line breaks.
+ This method is not re-entrant.
+ */
 - (NSString *) readLine {
 	// emptying out the line buffer - this method will keep on reading
 	// from the byte buffer and the stream until it can return a string,
@@ -58,18 +62,13 @@
 	// this specifies where in the byte buffer the new line element was
 	// found, but also serves as flag (if -1, no new line was found)
 	NSInteger found = -1;
-    // this remembers that the previous character was 0x0D so that we can then
-    // check for a following 0x0A as one new line (CR+LF)
-    BOOL foundCR = NO;
 	do {
 		if ( pos >= read ) {
 			// we have reached the end of the byte buffer, read another chunk
 			read = [stream read:dataBuffer maxLength:bufSize];
 			// reset position in buffer and offset
 			pos = offset = 0;
-            if ( read < 0 ) {
-                @throw [NSException exceptionWithName:@"StreamReadError" reason:nil userInfo:[NSDictionary dictionaryWithObject:[stream streamError] forKey:@"error"]];
-            } else if ( !read ) {
+			if ( read <= 0 ) {
 				// nothing was read, we have reached EOF
 				if ( [lineBuffer length] ) {
 					// if there are bytes in the line buffer, make sure whatever is there
@@ -83,37 +82,19 @@
 		}
 		// this loop looks for line termination markers
 		for ( ; pos < read; ++pos ) {
-            if ( foundCR ) {
-                foundCR = NO;
-				found = offset;
-                if ( dataBuffer[pos] == 0x0A ) {
-                    // found a CR + LF, save its position (we are already one char ahead)
-                    ++pos;
-                    break;
-                } else {
-                    // found a lone CR, save its position (we are already one char ahead)
-                    break;
-                }
-            }
-            // is it a line terminator?
-            if ( dataBuffer[pos] == 0x0D || dataBuffer[pos] == 0x0A || dataBuffer[pos] == 0x0C || dataBuffer[pos] == 0x85 ) {
-                // could be part of a CR+LF combination...
-                foundCR = dataBuffer[pos] == 0x0D;
-                // move the pointer forward to the character at the beginning of the new line
-                ++pos;
-                // definitely found one new line, save its position
-                found = pos;
-                break;
-            }
+            // don't break on \r, it will be removed later
+			if ( dataBuffer[pos] == '\n' ) {
+				// found one, save its position
+				found = pos;
+				// move the pointer forward to the character at the beginning of the new line
+				++pos;
+				break;
+			}
 		}
 		// add the processed bytes to the line buffer
 		[lineBuffer appendBytes:&dataBuffer[offset] length:(found < 0 ? read : found) - offset];
-		// need to check for a CR+LF combination?
-        if ( foundCR ) {
-            // if so, cannot exit now
-            found = -1;
         // should not return empty lines?
-        } else if ( found >= 0 && !wantsEmptyLines && ![lineBuffer length] ) {
+        if ( found >= 0 && !wantsEmptyLines && ![lineBuffer length] ) {
             // if so, cannot exit now
             found = -1;
             // move to next character of new line (???)
@@ -128,10 +109,17 @@
 	// Also note we increase bytesProcessed in readLine as it doesn't invoke [self read:maxLength:],
 	// but rather [stream read:maxLength:] directly, otherwise increasing in [MDBufferedInputStream read:maxLength:]
 	// would be enough
-	bytesProcessed += [lineBuffer length];
+    NSUInteger length = [lineBuffer length];
+	bytesProcessed += length;
 	// create a new string with the line buffer
 	// TODO check for leak issues with this code
-	return [[[NSString alloc] initWithData:lineBuffer encoding:encoding] autorelease];
+
+    const uint8_t *bytes = [lineBuffer bytes];
+    if (length > 0 && bytes[length - 1] == '\r') {
+        length -= 1; // remove last \r to interpret \r\n as line break
+    }
+
+	return [[[NSString alloc] initWithBytes:bytes length:length encoding:encoding] autorelease];
 }
 
 #pragma mark -
@@ -182,7 +170,7 @@
     NSMutableArray *titles = [[NSMutableArray alloc] init];
     int p = 0;
     NSString *token;
-    while ( token = [self csvReadToken:headline fromIndex:&p] ) {
+    while ( (token = [self csvReadToken:headline fromIndex:&p]) ) {
         [titles addObject:token];
     }
     csvTitles = [titles retain];
@@ -196,7 +184,7 @@
     NSMutableDictionary *dict = [[NSMutableDictionary alloc] init];
     int p = 0, f = 0;
     NSString *token;
-    while ( token = [self csvReadToken:dataline fromIndex:&p] ) {
+    while ( (token = [self csvReadToken:dataline fromIndex:&p]) ) {
         NSString *fieldName;
         if ( csvTitles && f < [csvTitles count] ) {
             fieldName = [csvTitles objectAtIndex:f];
@@ -217,7 +205,7 @@
 #pragma mark NSInputStream methods
 
 - (void) open {
-	if ( shouldCloseStream = ([stream streamStatus] == kCFStreamStatusNotOpen) ) {
+	if ( (shouldCloseStream = ([stream streamStatus] == kCFStreamStatusNotOpen)) ) {
 		// If the underlying stream is not already open, we open it ourselves
 		// and we will close it when the decorator is closed
 		[stream open];

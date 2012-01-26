@@ -34,6 +34,8 @@
 	BOOL shouldCloseStream;
 	// Whether the object should return empty lines or not
 	BOOL wantsEmptyLines;
+	// Whether the object should trim lines before returning them
+	BOOL trimLines;
 
     /**********************************
      CSV Files
@@ -47,6 +49,8 @@
 @property (readonly) NSUInteger bytesProcessed;
 // Returns or sets whether the object returns empty lines or not
 @property BOOL wantsEmptyLines;
+// Returns or sets whether the object should trim lines before returning them
+@property BOOL trimLines;
 
 // Creates a new decorator with the given stream, chunk size, and encoding
 - (id) initWithInputStream:(NSInputStream *)stream bufferSize:(NSUInteger)bufSize encoding:(NSStringEncoding)encoding;

@@ -28,6 +28,7 @@
 
 @synthesize bytesProcessed;
 @synthesize wantsEmptyLines;
+@synthesize trimLines;
 @synthesize csvTitles;
 
 #pragma mark -
@@ -119,7 +120,11 @@
         length -= 1; // remove last \r to interpret \r\n as line break
     }
 
-	return [[[NSString alloc] initWithBytes:bytes length:length encoding:encoding] autorelease];
+	NSString *line = [[[NSString alloc] initWithBytes:bytes length:length encoding:encoding] autorelease];
+    if ( trimLines ) {
+        line = [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    }
+    return line;
 }
 
 #pragma mark -
